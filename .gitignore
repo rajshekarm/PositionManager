@@ -1,0 +1,10 @@
+# .NET
+bin/
+obj/
+
+# Visual Studio
+*.user
+.vs/
+
+# HTTP scratch files
+*.http
