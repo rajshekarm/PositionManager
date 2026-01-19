@@ -1,39 +1,72 @@
+using PositionManager.Services;
+using PositionManager.Hubs;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+// Add services to the container
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// Add SignalR
+builder.Services.AddSignalR();
+
+// Register our services as singletons (in-memory storage)
+builder.Services.AddSingleton<PositionService>();
+builder.Services.AddSingleton<PositionHubService>();
+builder.Services.AddHostedService<MarketDataSimulator>();
+
+// Add CORS for development
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+// Wire up events for real-time updates
+var positionService = app.Services.GetRequiredService<PositionService>();
+var hubService = app.Services.GetRequiredService<PositionHubService>();
 
-var summaries = new[]
+positionService.PositionUpdated += async (sender, position) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
+    await hubService.BroadcastPositionUpdate(position);
 };
 
-app.MapGet("/weatherforecast", () =>
+positionService.PortfolioUpdated += async (sender, summary) =>
 {
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    await hubService.BroadcastPortfolioUpdate(summary);
+};
+
+// Configure the HTTP request pipeline
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseCors("AllowAll");
+app.UseHttpsRedirection();
+app.UseAuthorization();
+app.MapControllers();
+app.MapHub<PositionHub>("/hubs/positions");
+
+// Startup message
+app.Logger.LogInformation("=".PadRight(80, '='));
+app.Logger.LogInformation("Position Management & Analytics System");
+app.Logger.LogInformation("=".PadRight(80, '='));
+app.Logger.LogInformation("API: https://localhost:{Port}/swagger", app.Urls.FirstOrDefault()?.Split(':').LastOrDefault());
+app.Logger.LogInformation("SignalR Hub: /hubs/positions");
+app.Logger.LogInformation("=".PadRight(80, '='));
 
 app.Run();
-
-internal record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
